@@ -1,3 +1,5 @@
+// NOTE: SCENE.JSON DOESN'T WORK, BUT SCENE-2.JSON DOES!!!  
+
 var scene = null;
 var maxDepth = 1;
 var background_color = [190/255, 210/255, 215/255];
@@ -36,36 +38,78 @@ function raySphereIntersection(ray, sphere) {
     var radius = sphere.radius;
 
     // Compute intersection
+    var d = normalize(ray.direction); 
+    var e = ray.origin;
+    var A = dot(d, d);
+    var B = 2 * dot(d, sub(e, center));
+    var C = dot(sub(e, center), sub(e, center)) - (radius * radius);
+
 
     // If there is a intersection, return a new Intersection object with the distance and intersection point:
     // E.g., return new Intersection(t, point);
+    var discriminant = (B * B) - (4 * A * C) // slide 18: B^2 - 4AC
 
+    if (discriminant >= 0) {
+        var t = (-B - Math.sqrt(discriminant)) / (2 * A);
+
+        if (t > 0)
+            return new Intersection(t, add(ray.origin, mult(ray.direction, t - bias)));
+    }
     // If no intersection, return null
+    return null; 
 }
 
 function rayPlaneIntersection(ray, plane) {
 
     // Compute intersection
+    var n = normalize(plane.normal);
+    var d = ray.direction;
+    var intersection = dot(n, d);
+
 
     // If there is a intersection, return a dictionary with the distance and intersection point:
     // E.g., return new Intersection(t, point);
+    var dir = sub(plane.center, ray.origin);
+    var t = (dot(dir, plane.normal)) / intersection;
+
+    if (t > 0)
+        return new Intersection(t, add(ray.origin, mult(d, t - bias)));
 
     // If no intersection, return null
-
+    return null; 
 }
 
 function intersectObjects(ray, depth) {
-
+    var hitting = null; 
+    var distance = Infinity; 
 
     // Loop through all objects, compute their intersection (based on object type and calling the previous two functions)
     // Return a new Hit object, with the closest intersection and closest object
+    for (var i = 0; i < scene.objects.length; i++) {
+        var object = scene.objects[i];
+        var intersect = null;
 
+        if (object.type == "sphere")
+            intersect = raySphereIntersection(ray, object);
+        else if (object.type == "plane")
+            intersect = rayPlaneIntersection(ray, object);
+        
+        if (intersect != null) {
+            var d = intersect['distance'];
+
+            if (d < distance) {
+                hitting = new Hit(intersect, object);
+                distance = d;
+            }
+        }
+    }
     // If no hit, retur null
-
+    return hitting; 
 }
 
 function sphereNormal(sphere, pos) {
     // Return sphere normal
+    return normalize(sub(pos, sphere.center));
 }
 
 /*
@@ -81,9 +125,43 @@ function shade(ray, hit, depth) {
     // If sphere, use sphereNormal, if not then it's a plane, use object normal
     var normal;
 
+    if (object.type == "sphere")
+        normal = sphereNormal(object, hit.intersection.point); 
+    else if (object.type == "plane") 
+        normal = normalize(object.normal); 
+
     // Loop through all lights, computing diffuse and specular components *if not in shadow*
     var diffuse = 0;
     var specular = 0;
+
+    for (var i = 0; i < scene.lights.length; i++) {
+        var light = scene.lights[i];
+        if (isInShadow(hit, light) == false) {
+            var l = normalize(sub(light.position, hit.intersection.point));
+            var h = normalize(add(l, mult(ray.direction, -1)));
+            diffuse += Math.max(0, dot(l, normal));
+            specular += Math.pow(Math.max(0, dot(normal, h)), object.specularExponent);
+        }
+    }
+
+    // Combine colors, taking into account object constants
+    if(specularToggle)
+        color = add(color,mult([255,255,255], object.specularK*specular));
+    if(ambientToggle)
+        color = add(color,mult(object.color, object.ambientK));
+    if(diffuseToggle)
+        color = add(color,mult(object.color, object.diffuseK*diffuse));
+
+    // Handle reflection, make sure to call trace incrementing depth
+    
+    var reflectedColor = [0, 0, 0];
+
+    if (reflectionToggle) {
+        var reflectedRay = new Ray(hit.intersection.point, reflect(mult(ray.direction, -1), normal));
+        reflectedColor = trace(reflectedRay, depth + 1);
+        if (reflectedColor != null)
+                color = add(color, mult(reflectedColor, object.reflectiveK));
+    }
 
 
     // Combine colors, taking into account object constants
@@ -112,7 +190,14 @@ function isInShadow(hit, light) {
     // Check if there is an intersection between the hit.intersection.point point and the light
     // If so, return true
     // If not, return false
+    var ray = new Ray(hit.intersection.point, normalize(sub(light.position, hit.intersection.point)));
+    var hit2 = intersectObjects(ray, 0);
 
+    if (hit2 != null) {
+        if (hit2.intersection.distance > 0)
+            return true;
+    }
+    return false;
 }
 
 /*
